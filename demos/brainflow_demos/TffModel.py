@@ -142,7 +142,7 @@ class TffModel:
                 m_merged_epochs: mne.EpochsArray = merged_epochs.copy()
                 m_merged_epochs.filter(l_freq=freq_window[0], h_freq=freq_window[1])
                 train_x, train_y = TffModel.read_epochs(merged_epochs)
-                csp = CSP(n_components=4, reg=None, log=None, norm_trace=False,cov_est="epoch")
+                csp = CSP(n_components=4, reg=None, log=None, norm_trace=False)
                 # csp = MultiCSP(n_components=4, multiclass='ovr')
                 csp.fit(train_x, train_y)
                 train_x_csp = csp.transform(train_x)
@@ -224,7 +224,7 @@ class TffModel:
             # TODO:训练模型
             train_x, train_y = TffModel.read_epochs(train_data)
             test_x, test_y = TffModel.read_epochs(test_data)
-            csp = CSP(n_components=4, reg=None, log=None, norm_trace=False,cov_est="epoch")
+            csp = CSP(n_components=4, reg=None, log=None, norm_trace=False)
             # csp = MultiCSP(n_components=4, multiclass='ovr')
             csp.fit(train_x, train_y)
 
