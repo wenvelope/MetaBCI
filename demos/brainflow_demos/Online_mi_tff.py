@@ -11,6 +11,7 @@ from metabci.brainflow.workers import ProcessWorker
 from TffModel import TffModel, DataType
 import pandas as pd
 from pathlib import Path
+from scipy.signal import resample
 
 
 class FeedbackWorker(ProcessWorker):
@@ -74,8 +75,7 @@ class FeedbackWorker(ProcessWorker):
         :return: final_pre 预测结果 1 or 2 or 3 acc 准确率
          """
         model_list = self.models[model_index]
-        mne.filter.resample(x=data, up=200, down=sample_rate)
-
+        data = resample_eeg(data, old_freq=sample_rate, new_freq=200)
         vote_list = [0, 0, 0]
         for model in model_list:
             data_copy = copy.deepcopy(data)
@@ -126,6 +126,25 @@ class FeedbackWorker(ProcessWorker):
         eeg_data_filtered = signal.filtfilt(b, a, eeg_data, axis=-1)
 
         return eeg_data_filtered
+
+
+def resample_eeg(raw_data, old_freq, new_freq):
+    """将原始脑电数据重采样到新的采样率。
+
+    Args:
+        raw_data (ndarray): 原始的二维脑电数据数组，形状为 (n_channels, n_samples)。
+        old_freq (float): 原始的采样率，单位为 Hz。
+        new_freq (float): 新的采样率，单位为 Hz。
+
+    Returns:
+        ndarray: 重采样后的二维脑电数据数组，形状为 (n_channels, new_n_samples)。
+    """
+    old_n_samples = raw_data.shape[1]
+    new_n_samples = int(old_n_samples * new_freq / old_freq)
+    resampled_data = np.zeros((raw_data.shape[0], new_n_samples))
+    for channel in range(raw_data.shape[0]):
+        resampled_data[channel, :] = resample(raw_data[channel, :], new_n_samples)
+    return resampled_data
 
 
 if __name__ == '__main__':

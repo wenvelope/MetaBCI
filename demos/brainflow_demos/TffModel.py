@@ -3,9 +3,9 @@ from concurrent.futures import Future
 from enum import Enum
 from pathlib import Path
 import mne
-import numpy as np
 from sklearn.model_selection import KFold
 from sklearn.svm import SVC
+from sklearn.svm import LinearSVC
 from typing import List
 from sklearn.metrics import accuracy_score
 from metabci.brainda.algorithms.decomposition.csp import MultiCSP
@@ -15,6 +15,9 @@ from scipy import signal
 import copy
 from mne.decoding.csp import CSP
 from metabci.brainflow.logger import get_logger
+import numpy as np
+from scipy.signal import resample
+import pickle
 
 logger_tff = get_logger("tff_model")
 
@@ -68,7 +71,7 @@ class TffModel:
         :return: final_pre 预测结果 1 or 2 or 3 acc 准确率
          """
         model_list = self.__models[model_index]
-        mne.filter.resample(x=data, up=200, down=sample_rate)
+        data = resample_eeg(data, sample_rate, self.__sample_rate)
         vote_list = [0, 0, 0]
         for model in model_list:
             data_copy = copy.deepcopy(data)
@@ -97,6 +100,17 @@ class TffModel:
             for high in range(low + min_step, max_freq + 1, 2):
                 freq_windows.append([low, high])
         return freq_windows
+
+    @staticmethod
+    def load_model_time_list(file_path):
+        with open(file_path, 'rb') as file:
+            model_time_list = pickle.load(file)
+        return model_time_list
+
+    @staticmethod
+    def save_model_time_list(model_time_list, file_path):
+        with open(file_path, 'wb') as file:
+            pickle.dump(model_time_list, file)
 
     # 对五个时间窗建立五个模型
     def __build_models(self):
@@ -141,17 +155,19 @@ class TffModel:
                 freq_window = self.__freq_windows[acc_freq_list[index]['index']]
                 m_merged_epochs: mne.EpochsArray = merged_epochs.copy()
                 m_merged_epochs.filter(l_freq=freq_window[0], h_freq=freq_window[1])
-                train_x, train_y = TffModel.read_epochs(merged_epochs)
-                csp = CSP(n_components=4, reg=None, log=None, norm_trace=False)
+                train_x, train_y = TffModel.read_epochs(m_merged_epochs)
+                csp = CSP(n_components=4, reg=None, log=None, norm_trace=False, component_order="mutual_info")
                 # csp = MultiCSP(n_components=4, multiclass='ovr')
                 csp.fit(train_x, train_y)
                 train_x_csp = csp.transform(train_x)
-                svc = SVC(kernel='linear', C=1, decision_function_shape='ovo')
+                # svc = SVC(kernel='linear', C=1, decision_function_shape='ovo')
+                svc = LinearSVC(max_iter=10000)
                 # svc = SVC(kernel='linear', C=1, decision_function_shape='ovr')
                 svc.fit(train_x_csp, train_y)
                 csp_svc_freq = {'csp': csp, 'svc': svc, 'freq': acc_freq_list[index]['index']}
                 csp_svc_freq_list.append(csp_svc_freq)
             model_time_list.append(csp_svc_freq_list)
+        self.save_model_time_list(model_time_list, 'model_time_list.pickle')
         return model_time_list
 
     @property
@@ -224,14 +240,15 @@ class TffModel:
             # TODO:训练模型
             train_x, train_y = TffModel.read_epochs(train_data)
             test_x, test_y = TffModel.read_epochs(test_data)
-            csp = CSP(n_components=4, reg=None, log=None, norm_trace=False)
+            csp = CSP(n_components=4, reg=None, log=None, norm_trace=False, component_order="mutual_info")
+
             # csp = MultiCSP(n_components=4, multiclass='ovr')
             csp.fit(train_x, train_y)
 
             train_x_csp = csp.transform(train_x)
             test_x_csp = csp.transform(test_x)
 
-            svc = SVC(kernel='linear', C=1, decision_function_shape='ovo')
+            svc = LinearSVC(max_iter=10000)
             # svc = SVC(kernel='linear', C=1, decision_function_shape='ovr')
             svc.fit(train_x_csp, train_y)
             train_y_pre = svc.predict(test_x_csp)
@@ -262,5 +279,28 @@ class TffModel:
         return eeg_data_filtered
 
 
+def resample_eeg(raw_data, old_freq, new_freq):
+    """将原始脑电数据重采样到新的采样率。
+
+    Args:
+        raw_data (ndarray): 原始的二维脑电数据数组，形状为 (n_channels, n_samples)。
+        old_freq (float): 原始的采样率，单位为 Hz。
+        new_freq (float): 新的采样率，单位为 Hz。
+
+    Returns:
+        ndarray: 重采样后的二维脑电数据数组，形状为 (n_channels, new_n_samples)。
+    """
+    old_n_samples = raw_data.shape[1]
+    new_n_samples = int(old_n_samples * new_freq / old_freq)
+    resampled_data = np.zeros((raw_data.shape[0], new_n_samples))
+    for channel in range(raw_data.shape[0]):
+        resampled_data[channel, :] = resample(raw_data[channel, :], new_n_samples)
+    return resampled_data
+
+
 if __name__ == '__main__':
-    tff_model = TffModel(subject_id='12whr', day_num=2, data_type=DataType.CNT)
+    # tff_model = TffModel(subject_id='12whr', day_num=5, data_type=DataType.CNT)
+    model_list = TffModel.load_model_time_list("model_time_list.pickle")
+    csp1 = model_list[0][1]['csp']
+    csp2 = model_list[0][2]['csp']
+
